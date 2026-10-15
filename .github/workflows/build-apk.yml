@@ -1,0 +1,60 @@
+name: Build Cosigna APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Find the app folder
+        run: echo "APP_DIR=$(dirname "$(find . -name index.html -not -path '*/node_modules/*' -not -path '*/android/*' -not -path '*/www/*' | head -n 1)")" >> "$GITHUB_ENV"
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Create package.json if missing
+        run: cd "$APP_DIR" && if [ ! -f package.json ]; then npm init -y; fi
+
+      - name: Install Capacitor
+        run: cd "$APP_DIR" && npm install --no-audit --no-fund @capacitor/core@^8.5.2 @capacitor/android@^8.5.2 @capacitor/app@^8.1.2 @capacitor/cli@^8.5.2
+
+      - name: Copy the app files into www
+        run: cd "$APP_DIR" && mkdir -p www && cp index.html styles.css data.js state.js screens.js app.js www/
+
+      - name: Create Capacitor config if missing
+        run: cd "$APP_DIR" && if [ ! -f capacitor.config.json ]; then npx cap init Cosigna com.cosigna.prototype --web-dir www; fi
+
+      - name: Create the Android project
+        run: cd "$APP_DIR" && if [ ! -d android ]; then npx cap add android; fi && npx cap sync android
+
+      - name: Create app icons (optional)
+        run: cd "$APP_DIR" && (pip install pillow > /dev/null 2>&1 && python3 make_icons.py || echo "Icons skipped")
+
+      - name: Accept Android licences
+        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null || true
+
+      - name: Install Android SDK 36
+        run: $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" "build-tools;36.0.0" > /dev/null || true
+
+      - name: Build the APK
+        run: cd "$APP_DIR/android" && chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+
+      - name: Save the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cosigna-APK
+          path: ${{ env.APP_DIR }}/android/app/build/outputs/apk/debug/app-debug.apk
