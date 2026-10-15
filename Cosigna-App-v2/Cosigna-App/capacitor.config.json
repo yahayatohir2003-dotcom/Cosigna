@@ -1,0 +1,7 @@
+{
+  "appId": "com.cosigna.prototype",
+  "appName": "Cosigna",
+  "webDir": "www",
+  "backgroundColor": "#0B2A6F",
+  "android": { "allowMixedContent": false }
+}
