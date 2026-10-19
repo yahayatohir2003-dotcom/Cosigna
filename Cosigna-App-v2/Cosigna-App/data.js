@@ -16,10 +16,21 @@
     { id: 'savannah', name: 'Savannah Demo Bank', note: 'Coming soon', ok: false }
   ];
   TP.ACCOUNTS = [
-    { id: 'a1', name: 'Sunrise Ventures Joint Account', no: '4821', rule: 'All signatories must sign', state: 'eligible' },
-    { id: 'a2', name: 'Family Savings', no: '1180', rule: 'Either to sign', state: 'no', why: 'One person can already use a card, so approvals are not needed.' },
-    { id: 'a3', name: 'Operations Account', no: '5521', rule: 'Class A/B signatories with limits', state: 'no', why: 'Class A/B mandates are not supported yet.' }
+    { id: 'a1', type: 'joint', name: 'Sunrise Ventures Joint Account', no: '4821', rule: 'All signers must sign', state: 'eligible' },
+    { id: 'a4', type: 'coop', name: 'Unity Thrift & Credit Cooperative', no: '7714', rule: 'Any 2 officers sign. The Treasurer must be one.', state: 'eligible' },
+    { id: 'a2', type: 'joint', name: 'Family Savings', no: '1180', rule: 'Either to sign', state: 'no', why: 'One person can already use a card, so approvals are not needed.' },
+    { id: 'a3', type: 'coop', name: 'Youth Union Society', no: '5521', rule: 'Class A/B signatories with limits', state: 'no', why: 'Class A/B mandates are not supported yet.' }
   ];
+  TP.ACC = {
+    joint: { id: 'joint', type: 'joint', name: 'Sunrise Ventures Joint Account', short: 'Joint account', no: '4821', bal: 48250000, acctId: 'a1' },
+    coop: { id: 'coop', type: 'coop', name: 'Unity Thrift & Credit Cooperative', short: 'Cooperative', no: '7714', bal: 86400000, acctId: 'a4' }
+  };
+  TP.ROLES = { A: 'President', B: 'Secretary', C: 'Treasurer' };
+  TP.PAYTYPES = [['loan', 'Loan disbursement', 'Loan approval no.'], ['div', 'Dividend / share-out', 'AGM resolution no.'], ['sup', 'Supplier payment', 'Committee resolution or invoice no.'], ['refund', 'Member savings refund', 'Exit approval no.']];
+  TP.MEMBERS = ['Ngozi Eze', 'Musa Danjuma', 'Femi Adeleke', 'Hauwa Bello', 'Ifeanyi Obi'];
+  TP.TYPICAL_PAY = 400000;  // sample "usual payout" used by the simulated AI check
+  TP.OPT_COOP = { max: [5000000, 10000000, 20000000], hv: [500000, 1000000, 2000000], delay: [30, 60], cool: [24, 48], cap: [10000000, 20000000, 30000000] };
+  TP.NAMEBOOK = ['Adaeze Nwosu', 'Yusuf Garba', 'Bola Ajayi', 'Esther Udo', 'Kabir Sani', 'Tolu Martins', 'Zainab Lawal', 'Peter Eze', 'Ruth Danladi', 'Sade Coker'];
   TP.CHIPS = [500000, 1000000, 1500000, 2000000, 5000000];
   TP.OPT = { max: [5000000, 10000000, 20000000], hv: [250000, 500000, 1000000], delay: [30, 60] };
   TP.BALANCE = 48250000;   // sample balance, display only
@@ -68,6 +79,57 @@
         { id: 1, to: 'all', t: 'Yesterday', title: 'Shared approvals active', body: 'Unity Demo Bank (simulated) confirmed the setup.', k: 'ok', read: true },
         { id: 2, to: 'all', t: 'Mon', title: 'Cash collected', body: 'Chinedu collected ₦1,500,000 at the branch.', k: 'ok', read: true }
       ]
+    };
+  };
+
+  TP.PROTECT_COOP = [
+    ['bank', 'Bank mandate first', 'The bank\'s signing rule (2 officers, Treasurer required) always wins. Cosigna only adds stricter rules.', 'Rules'],
+    ['stop', 'Payouts only: no cash', 'The account pays by bank transfer to verified accounts. There is no cash withdrawal.', 'Rules'],
+    ['doc', 'Approval reference required', 'Every payout cites a loan approval, resolution or invoice number.', 'Rules'],
+    ['id', 'Name-verified payees', 'The account name is checked with the bank before a payee is saved.', 'Payees'],
+    ['clock', 'New-payee cooling-off', 'A new payee cannot be paid until the cooling-off period ends.', 'Payees'],
+    ['users', 'Maker-checker', 'The person who prepares a payout cannot approve it. The Treasurer checks, and cannot prepare.', 'Approvals'],
+    ['alert', 'Conflict-of-interest block', 'Officers cannot approve or prepare payouts to themselves.', 'Approvals'],
+    ['face', 'Live face check', 'Required for high-value payouts, matched to your record.', 'Approvals'],
+    ['fp', 'Fingerprint or PIN', 'Every approval is confirmed on your phone.', 'Approvals'],
+    ['sign', 'Signed approvals', 'Each approval is signed on your device and cannot be reused.', 'Approvals'],
+    ['key', 'Device-bound secret key', 'Your key lives in the phone\'s secure chip and never leaves it.', 'Approvals'],
+    ['gauge', 'Limits and daily cap', 'A per-payout limit and a daily payout cap protect the pooled funds.', 'Limits'],
+    ['dup', 'Duplicate payout check', 'The same payee and amount twice in a day is flagged.', 'Limits'],
+    ['clock', 'Safety delay', 'High-value payouts wait, and any officer can stop them.', 'Limits'],
+    ['ai', 'AI risk warning', 'Flags unusual payouts before you approve.', 'Monitoring'],
+    ['chain', 'Tamper-evident audit trail', 'Every record is chained to the one before it.', 'Monitoring'],
+    ['bell', 'Alerts to all officers', 'Every payout request, approval and payment is announced.', 'Monitoring'],
+    ['stop', 'Instant freeze', 'Any officer can stop all payouts at once.', 'Limits']
+  ];
+  TP.seedBens = function () {
+    var h = 3600000;
+    return [
+      { id: 'b1', name: 'Ngozi Eze', bank: 'Unity Demo Bank', no: '0412', kind: 'Member', verified: true, cool: 0, recent: false },
+      { id: 'b2', name: 'Musa Danjuma', bank: 'Harmony Sandbox Bank', no: '7721', kind: 'Member', verified: true, cool: 0, recent: false },
+      { id: 'b3', name: 'Bright Supplies Ltd', bank: 'Savannah Demo Bank', no: '3305', kind: 'Supplier', verified: true, cool: 0, recent: true },
+      { id: 'b4', name: 'Chinedu Okafor', bank: 'Unity Demo Bank', no: '2208', kind: 'Member', officer: 'B', verified: true, cool: 0, recent: false },
+      { id: 'b5', name: 'Grace Ibe', bank: 'Unity Demo Bank', no: '9150', kind: 'Member', verified: true, cool: Date.now() + 18 * h, recent: true }
+    ];
+  };
+  TP.seedCoop = function () {
+    var ap2 = { A: 'approved', B: 'na', C: 'approved' }, ap3 = { A: 'approved', B: 'approved', C: 'approved' };
+    function pay(id, amt, by, type, payee, st, when, need, ap, risk, audit, extra) {
+      var o = { id: id, type: 'req', kind: 'payout', acct: 'coop', payType: type, payee: payee, amt: amt, by: by, st: st, hv: amt >= 1000000, when: when, need: need, ap: ap, risk: risk, refNo: extra && extra.refNo || '', ref: TP.ref(), audit: audit };
+      if (extra) for (var k in extra) o[k] = extra[k]; return o;
+    }
+    return {
+      hist: [
+        pay('P-0731', 750000, 'A', 'Loan disbursement', 'Ngozi Eze', 'sent', 'Mon, 28 Sep', ['A', 'C'], { A: 'approved', B: 'na', C: 'approved' }, { score: 8, level: 'Low' }, [
+          a('11:02 am', 'Amina', 'Prepared payout ₦750,000 to Ngozi Eze (LN-0231)'), a('11:03 am', 'AI check', 'Risk Low (8/100) · simulated', 'sec'), a('11:04 am', 'Amina', 'Approved: biometric · signed', 'ok'),
+          a('11:20 am', 'Tunde', 'Approved as Treasurer: biometric · signed', 'ok'), a('11:20 am', 'System', 'Bank released the payout (simulated transfer)', 'ok')], { refNo: 'LN-0231', session: 'NIP00481…2D1' }),
+        pay('P-0730', 2400000, 'B', 'Dividend / share-out', 'All members (5)', 'sent', 'Fri, 25 Sep', ['A', 'B', 'C'], ap3, { score: 20, level: 'Low' }, [
+          a('9:10 am', 'Chinedu', 'Prepared dividend ₦2,400,000 to 5 members (AGM/2026/03)'), a('9:11 am', 'AI check', 'Risk Low (20/100) · simulated', 'sec'), a('9:12 am', 'Chinedu', 'Approved: biometric + face · signed', 'ok'),
+          a('9:40 am', 'Amina', 'Approved: biometric + face · signed', 'ok'), a('9:44 am', 'Tunde', 'Approved as Treasurer: biometric + face · signed', 'ok'), a('9:45 am', 'System', 'Safety delay started (30 min)', 'pend'), a('10:15 am', 'System', 'Bank released 5 payouts (simulated)', 'ok')], { refNo: 'AGM/2026/03', session: 'NIP00377…9AC' }),
+        pay('P-0729', 1200000, 'A', 'Supplier payment', 'Bright Supplies Ltd', 'rejected', 'Tue, 22 Sep', ['A', 'B', 'C'], { A: 'approved', B: 'pending', C: 'rejected' }, { score: 38, level: 'Medium' }, [
+          a('3:30 pm', 'Amina', 'Prepared payout ₦1,200,000 to Bright Supplies Ltd (INV-884)'), a('3:35 pm', 'Tunde', 'Rejected: Invoice not approved by committee', 'bad'), a('3:35 pm', 'System', 'Request closed. No payout made.', 'bad')], { refNo: 'INV-884', reason: 'Invoice not approved by committee' })
+      ],
+      notes: [{ id: 21, to: 'all', t: 'Yesterday', title: 'Cooperative payouts active', body: 'Unity Demo Bank (simulated) confirmed the setup.', k: 'ok', read: true }]
     };
   };
 })();
