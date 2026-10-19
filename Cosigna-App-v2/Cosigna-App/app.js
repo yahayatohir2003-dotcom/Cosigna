@@ -2,7 +2,7 @@
 (function () {
   var TP = window.TP, S = TP.S, P = TP.PEOPLE, FT = function () { return TP.FT; };
   var TABS = ['home', 'approvals', 'history', 'security'];
-  var BACK = { how: 'welcome', auth: 'welcome', otp: 'auth', idv: 'otp', bank: 'idok', consent: 'bank', accounts: 'consent', rule: 'accounts', conditions: 'rule', invites: 'conditions', request: 'home', track: 'home', approve: 'home', delay: 'track', code: 'track', alerts: 'home', profile: 'home' };
+  var BACK = { how: 'welcome', auth: 'welcome', otp: 'auth', idv: 'otp', bank: 'idok', consent: 'bank', accounts: 'consent', rule: 'accounts', conditions: 'rule', invites: 'conditions', request: 'home', payout: 'home', payamt: 'payout', bens: 'home', addben: 'bens', rules: 'home', track: 'home', approve: 'home', delay: 'track', code: 'track', alerts: 'home', profile: 'home' };
   var timers = [], toastT = null, pushT = null;
   TP.later = function (fn, ms) { timers.push(setTimeout(fn, ms)); };
   TP.clear = function () { timers.forEach(clearTimeout); timers = []; };
@@ -38,7 +38,8 @@
   var OK = {
     auth: function () { var f = S.form; return S.authTab === 'signup' ? f.name.trim().length >= 3 && /^\d{11}$/.test(f.phone) && /^\d{4}$/.test(f.pin) : /^\d{11}$/.test(f.lphone) && /^\d{4}$/.test(f.lpin); },
     otp: function () { return /^\d{6}$/.test(S.form.otp); },
-    idv: function () { return /^\d{11}$/.test(S.form.idn); }
+    idv: function () { return /^\d{11}$/.test(S.form.idn); },
+    payout: function () { return S.payForm.ref.trim().length > 0 && (S.payForm.type === 'div' || !!S.payForm.ben); }
   };
   function refresh() { var b = $('primary'); if (b && OK[S.screen]) b.disabled = !OK[S.screen](); }
   var C = 2 * Math.PI * 42;
@@ -55,9 +56,10 @@
 
   // ---- simulated verification: fingerprint/PIN, then face for high-value, then device signing
   function startVerify(purpose) {
-    var r = S.req, amt = Number(S.amt), hv = purpose === 'send' ? TP.isHV(amt) : purpose === 'approve' ? !!(r && r.hv) : false;
+    var r = S.req, amt = Number(S.amt), hv = purpose === 'send' ? TP.isHV(amt) : purpose === 'payout' ? TP.isHV(TP.payTotal()) : purpose === 'approve' ? !!(r && r.hv) : false;
     var steps = purpose === 'identity' ? ['face'] : ['bio'].concat(hv ? ['face'] : [], ['sign']);
-    var sub = { identity: 'Live face check for your identity', send: 'Confirm to send ' + TP.m(amt) + ' for approval', approve: 'Approve ' + (r ? TP.m(r.amt) : '') + ' for ' + (r ? TP.nm(r.by) : ''), unfreeze: 'Approve unfreezing withdrawals' }[purpose];
+    var what = r ? (r.kind === 'beneficiary' ? 'new payee ' + r.payee : TP.m(r.amt) + (r.kind === 'payout' ? ' payout to ' + r.payee : '')) : '';
+    var sub = { identity: 'Live face check for your identity', send: 'Confirm to send ' + TP.m(amt) + ' for approval', payout: 'Confirm to send a ' + TP.m(TP.payTotal()) + ' payout for approval', addben: 'Confirm to propose this payee', approve: 'Approve ' + what + (r ? ' for ' + TP.nm(r.by) : ''), unfreeze: 'Approve unfreezing' }[purpose];
     S.vf = { purpose: purpose, steps: steps, i: 0, step: steps[0], mode: 'bio', pin: '', err: '', fs: 0, running: false, scanning: false, signed: false, nonce: TP.hx(String(Math.random())).slice(0, 6), sig: TP.ref(), title: "Confirm it's you", sub: sub };
     go('verify');
   }
@@ -85,7 +87,12 @@
     var v = S.vf, p = v.purpose; S.vf = null;
     if (p === 'identity') go('keygen');
     else if (p === 'send') { TP.createRequest(); go('track'); say('Request sent. Waiting for the other signers.'); }
-    else if (p === 'approve') { TP.approve(S.user); go('track'); say(S.req.st === 'delay' ? 'All approved. Safety delay started.' : S.req.st === 'code' ? 'All approved. Cash code issued.' : 'Approved and signed on your device.'); }
+    else if (p === 'payout') { TP.createPayout(); go('track'); say('Payout sent for approval.'); }
+    else if (p === 'addben') { TP.createBeneficiary(); go('track'); say('Payee proposed. The Treasurer must approve.'); }
+    else if (p === 'approve') {
+      TP.approve(S.user); var st = S.req.st;
+      go('track'); say(st === 'delay' ? 'All approved. Safety delay started.' : st === 'code' ? 'All approved. Cash code issued.' : st === 'sent' ? 'All approved. Payout sent.' : st === 'done' ? 'Payee approved. Cooling-off started.' : 'Approved and signed on your device.');
+    }
     else if (p === 'unfreeze') { TP.approveUnfreeze(S.user); go('profile'); say(S.frozen ? 'Your approval is recorded.' : 'Account unfrozen.'); }
   }
   function after() {
@@ -104,12 +111,22 @@
   }
   setInterval(function () {
     clockText();
-    if (TP.tick()) { if (S.screen === 'delay') { go('track'); say('Safety delay finished. Cash code issued.'); } else render(); }
+    if (TP.tick()) { if (S.screen === 'delay') { go('track'); say(S.req && S.req.kind === 'payout' ? 'Safety delay finished. Payout sent.' : 'Safety delay finished. Cash code issued.'); } else render(); }
   }, 500);
 
   // ---- inputs (no re-render, keeps the keyboard open)
+  function resolveAb() {
+    var ab = S.ab;
+    if (ab.no.length === 10 && ab.state !== 'ok' && ab.state !== 'resolving') {
+      ab.state = 'resolving'; render();
+      TP.later(function () { ab.name = TP.NAMEBOOK[Number(ab.no.slice(-1))]; ab.state = 'ok'; render(); }, FT() * 1.1);
+    } else if (ab.no.length < 10 && ab.state) { ab.state = ''; ab.name = ''; }
+  }
   document.addEventListener('input', function (e) {
-    var k = e.target.dataset && e.target.dataset.bind; if (!k) return;
+    var d = e.target.dataset || {};
+    if (d.pf) { S.payForm[d.pf] = e.target.value; refresh(); return; }
+    if (d.ab) { var nv = e.target.value.replace(/\D/g, '').slice(0, 10); e.target.value = nv; S.ab.no = nv; resolveAb(); return; }
+    var k = d.bind; if (!k) return;
     var v = e.target.value; if (k !== 'name') { v = v.replace(/\D/g, ''); e.target.value = v; }
     S.form[k] = v; refresh();
   });
@@ -119,7 +136,7 @@
     var t = e.target.closest('[data-a]'); if (!t) return;
     var a = t.dataset.a, v = t.dataset.v, f = S.form, nmk = TP.nm(S.user);
     switch (a) {
-      case 'go': if (v === 'request' && TP.active()) { go('track'); say('A request is already in progress.'); } else go(v); break;
+      case 'go': if ((v === 'request' || v === 'payout') && TP.active()) { go('track'); say('A request is already in progress.'); } else go(v); break;
       case 'tab': go(v); break;
       case 'auth': S.authTab = v; go('auth'); break;
       case 'authtab': S.authTab = v; render(); break;
@@ -149,7 +166,16 @@
         render(); break;
       case 'bank': S.setup.bank = v; render(); break;
       case 'soon': say('Not a partner yet. Joint accounts at this bank are not supported.'); break;
-      case 'acct': S.setup.acct = v; go('rule'); break;
+      case 'acct': var ac = TP.ACCOUNTS.filter(function (x) { return x.id === v; })[0]; TP.switchAcct(ac.type); S.setup.bank = 'unity'; S.setup.inv = { B: 0, C: 0 }; go('rule'); break;
+      case 'swacct': TP.switchAcct(v); go('home'); say('Switched to ' + TP.acc().short); break;
+      case 'linknew': S.sheet = null; go('accounts'); break;
+      case 'ptype': S.payForm.type = v; S.amt = ''; render(); break;
+      case 'pben': S.payForm.ben = v; render(); break;
+      case 'pcool': say('This payee is in cooling-off and cannot be paid yet.'); break;
+      case 'abbank': S.ab.bank = v; render(); break;
+      case 'abkind': S.ab.kind = v; render(); break;
+      case 'absample': S.ab.no = '0123456783'; S.ab.state = ''; resolveAb(); break;
+      case 'skipcool': S.bens.forEach(function (b) { b.cool = 0; }); render(); say('Demo: cooling-off skipped.'); break;
       case 'noacct': say(TP.ACCOUNTS.filter(function (x) { return x.id === v; })[0].why); break;
       case 'setc': S.setup[t.dataset.k] = Number(v); render(); break;
       case 'sendinv': S.setup.inv = { B: 0, C: 0 }; go('invites'); break;
@@ -186,6 +212,7 @@
     else if (S.screen === 'activation' || S.screen === 'keygen' || S.screen === 'splash') { /* stay */ }
     else if (S.screen === 'welcome') A.exitApp();
     else if (S.screen === 'done') go('home');
+    else if (S.screen === 'accounts') go(TP.linked('joint') || TP.linked('coop') ? 'home' : 'consent');
     else if (BACK[S.screen]) go(BACK[S.screen]);
     else if (S.screen !== 'home' && TABS.indexOf(S.screen) > -1) go('home');
     else A.exitApp();
